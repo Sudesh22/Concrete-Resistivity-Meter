@@ -52,12 +52,16 @@ UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
 ADS1xx5_I2C i2c;
+ADS1xx5_I2C i2c1;
 
 typedef int bool;
 #define true 1
 #define false 0
 
-int16_t adc1,v;
+uint8_t menu = 1;
+uint8_t maxReadings = 20;
+uint8_t maxSet = 100;
+int16_t adc1, v, v23v, v23adc1;
 uint8_t rxData, txData;
 uint16_t rangeResistor[] = {10, 100, 500};
 uint16_t Device_ID = 2241;
@@ -68,11 +72,14 @@ char str[20];
 char *sendStr;
 
 float range[] = {0.005,0.05,0.025};
-float LastLocation, empty, voltage, vrms, I;
+float LastLocation, empty, voltage, vrms, I, v23voltage, v23vrms, resistivity, avgResistivity;
 const float voltageConv = 6.114 / 32768.0;
 
-bool done = 1;
 bool Boot;
+bool done = 1;
+bool danger = 0;
+bool save = 0;
+bool currState = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -88,7 +95,25 @@ static void MX_USART1_UART_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+void getv23readings(){
+	v23v = 0;
+	for (int i = 0; i < 53; i++) {					// check with53 samples
+//			HD44780_Clear();
+//			HD44780_SetCursor(0, 0);
+//			HD44780_PrintStr("Processing...");
+			v23adc1 = ADSreadADC_Differential_0_1_Continuous(&i2c1);
+			v23voltage = v23voltage - 0; // Calibrate at 100mV
+			if (v23adc1 > v23v) {
+				v23v = v23adc1;
+			}
+		}
+	v23voltage = v23v * voltageConv;
+	v23vrms = (v23voltage / (sqrt(2)))*20000.0;
+//	v23vrms -= 1.4116;
+}
+
 void getReadings() {
+	v = 0;
 	for (int i = 0; i < 53; i++) {					// check with53 samples
 		HD44780_Clear();
 		HD44780_SetCursor(0, 0);
@@ -100,7 +125,8 @@ void getReadings() {
 		}
 	}
 	voltage = v * voltageConv;
-	vrms = voltage / (sqrt(2));
+	vrms = (voltage / (sqrt(2)));
+//	vrms -= 0.015;
 }
 
 char floatToCharArr(float text)
@@ -121,7 +147,7 @@ void logValue()
 
 	if(LastLocation == empty)
 	{
-		  W25Q_Write_NUM(4, Device_ID);	  		// Device_ID at Memory Location 0
+		  W25Q_Write_NUM(4, Device_ID);	  		// Device_ID at Memory Location 4
 		  Boot = false;
 	}
 
@@ -148,7 +174,7 @@ void logValue()
 //	W25Q_Write_NUM(address + 6 * sizeof(float), yy);
 
 	W25Q_Write_NUM(0, address);	  			// Arbitrary value at Memory Location 0
-//	address += 7 * sizeof(float);
+	address += 1 * sizeof(float);
 	HAL_Delay(1000);
 }
 
@@ -157,6 +183,89 @@ char uint32_tToCharArr(uint32_t text)
 	char str[1000];
 	sprintf(str, "%lu",text);
 	return str;
+}
+
+void settings(){
+	ui1();
+	switch (menu){
+	case 0:
+		menu = 1;
+		HD44780_SetCursor(0,0);
+	    HD44780_PrintStr(">");
+	    HD44780_SetCursor(0,1);
+	    HD44780_PrintStr(" ");
+	    break;
+
+	case 1:
+		HD44780_SetCursor(0,0);
+		HD44780_PrintStr(">");
+		HD44780_SetCursor(0,1);
+		HD44780_PrintStr(" ");
+	    break;
+
+	case 2:
+		HD44780_SetCursor(0,0);
+		HD44780_PrintStr(" ");
+		HD44780_SetCursor(0,1);
+		HD44780_PrintStr(">");
+	    break;
+
+	case 3:
+		menu = 1;
+		settings();
+		break;
+	}
+}
+
+void executeAction(){
+	switch (menu) {
+	    case 1:
+//	      action1();
+	      break;
+	    case 2:
+	      action2();
+	      break;
+	  }
+}
+
+void action1(){
+	HD44780_Clear();
+	HD44780_SetCursor(0,0);
+	HD44780_PrintStr(" View data");
+	HD44780_SetCursor(0,1);
+	HD44780_PrintStr(" Delete data");
+}
+
+void action2(){
+	HD44780_Clear();
+	HD44780_SetCursor(0,0);
+	HD44780_PrintStr("Delete all data?");
+	HD44780_SetCursor(4,1);
+	HD44780_PrintStr("Yes");
+	HD44780_SetCursor(10,1);
+	HD44780_PrintStr("No");
+}
+
+void ui1(){
+	HD44780_Clear();
+	HD44780_SetCursor(0,0);
+	HD44780_PrintStr(" 2 Point");
+	HD44780_SetCursor(0,1);
+	HD44780_PrintStr(" 4 Point");
+}
+
+void chipErased(){
+	HD44780_Clear();
+	HD44780_SetCursor(0,0);
+	HD44780_PrintStr("Chip Erased...");
+	delay(2000);
+	defaultDisplay();
+}
+
+void defaultDisplay(){
+	HD44780_Clear();
+	HD44780_SetCursor(1,0);
+	HD44780_PrintStr("Press to start");
 }
 
 /* USER CODE END 0 */
@@ -197,7 +306,9 @@ int main(void)
 
 //  W25Q_Reset();
   ADS1115(&i2c, &hi2c1, ADS_ADDR_GND); // Or ADS1015(&i2c, &hi2c1, ADS_ADDR_GND);
+  ADS1115(&i2c1, &hi2c1, ADS_ADDR_VDD);
   ADSsetGain(&i2c, GAIN_TWOTHIRDS);
+  ADSsetGain(&i2c1, GAIN_TWOTHIRDS);
   HD44780_Init(2);
   HD44780_SetCursor(3,0);
   HD44780_PrintStr("VEDANTRIK");
@@ -207,11 +318,12 @@ int main(void)
   HD44780_Clear();
 
   HAL_UART_Receive_IT(&huart1, &rxData, 1);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, 1);
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, 1);
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, 1);
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, 1);
-  HD44780_SetCursor(1,0);
-  HD44780_PrintStr("Press to start");
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, 1);
+  defaultDisplay();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -223,6 +335,60 @@ int main(void)
 		  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
 		  HAL_Delay(10);
 		  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+
+
+		  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, 0);
+		  HAL_Delay(1000);
+		  if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_8) == 1){
+			  while(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_8) == 1){
+				  	  	HD44780_Clear();
+			  			HD44780_SetCursor(5,0);
+			  		    HD44780_PrintStr("Highly");
+			  			HD44780_SetCursor(3,1);
+			  		    HD44780_PrintStr("Conductive");
+			  		    HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+						HAL_Delay(10);
+						HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+						HAL_Delay(200);
+						HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+						HAL_Delay(10);
+						HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+						HAL_Delay(10);
+						HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+						HAL_Delay(200);
+						HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+						HAL_Delay(10);
+			  		}
+		  }
+		  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, 1);
+
+//		  if (danger){
+//			  while (1){
+//				  	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, 1);
+//					HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+//					HAL_Delay(10);
+//					HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+//					HAL_Delay(200);
+//					HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+//					HAL_Delay(10);
+//					HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+//					HAL_Delay(200);
+//					HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+//					HAL_Delay(10);
+//					HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+//					HAL_Delay(200);
+//					HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+//					HAL_Delay(10);
+//					HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+//					HAL_Delay(200);
+//					HD44780_SetCursor(5,0);
+//					HD44780_PrintStr("Danger!");
+////					HD44780_SetCursor(3,1);
+////				    HD44780_PrintStr("detected!");
+//			  }
+//		  }else{
+			  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, 0);
+//		  }
 //		  v = 0;
 //			   HD44780_Clear();
 //		  for (int i = 0; i < 3; i++){						// check range
@@ -286,6 +452,7 @@ int main(void)
 			  }
 			  v = 0;
 			  getReadings();
+			  getv23readings();
 			  if (vrms<range[0] && currRange != 2){
 	//			  switch from 10 ohm to 100ohm
 //				  HD44780_SetCursor(0,0);
@@ -326,6 +493,10 @@ int main(void)
 					  sprintf(str, "R:500-50000");
 				  }
 				  HD44780_PrintStr(str);
+				  resistivity = (v23vrms/I)*10.0*3.1415;
+				  HD44780_SetCursor(8,1);
+				  sprintf(str, "%.2fk", resistivity);
+				  HD44780_PrintStr(str);
 				  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
 				  HAL_Delay(10);
 				  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
@@ -333,10 +504,11 @@ int main(void)
 				  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
 				  HAL_Delay(10);
 				  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+
 				  break;
 			  }
 
-			  if ((currRange == 3) && (vrms <0.001)){
+			  if ((v23vrms <0.005) && (vrms <0.005)){
 				  HD44780_Clear();
 				  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
 				  HAL_Delay(10);
@@ -345,6 +517,7 @@ int main(void)
 				  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
 				  HAL_Delay(10);
 				  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+				  HD44780_Clear();
 				  HD44780_SetCursor(3,0);
 				  HD44780_PrintStr("No sample");
 				  HD44780_SetCursor(3,1);
@@ -382,6 +555,10 @@ int main(void)
 //			  sprintf(str, "R:500-50000");
 //		  }
 //		  HD44780_PrintStr(str);
+		  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, 1);
+		  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, 1);
+	      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, 1);
+		  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, 1);
 		  done = 1;
 	  }
 //	 done = 0;
@@ -589,22 +766,39 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1|GPIO_PIN_15, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12|GPIO_PIN_14, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3|GPIO_PIN_4|GPIO_PIN_5, GPIO_PIN_SET);
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3|GPIO_PIN_4, GPIO_PIN_SET);
-
-  /*Configure GPIO pin : PB1 */
+  /*Configure GPIO pin : PA1 */
   GPIO_InitStruct.Pin = GPIO_PIN_1;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : PA2 PA8 */
+  GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_8;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : PB0 PB1 PB10 PB11
+                           PB13 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_10|GPIO_PIN_11
+                          |GPIO_PIN_13;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB12 PB14 PB3 PB4 */
-  GPIO_InitStruct.Pin = GPIO_PIN_12|GPIO_PIN_14|GPIO_PIN_3|GPIO_PIN_4;
+  /*Configure GPIO pins : PB12 PB14 PB3 PB4
+                           PB5 */
+  GPIO_InitStruct.Pin = GPIO_PIN_12|GPIO_PIN_14|GPIO_PIN_3|GPIO_PIN_4
+                          |GPIO_PIN_5;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -618,8 +812,17 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+
   HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI1_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI2_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
 }
 
@@ -629,10 +832,45 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 //		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, 1);
 //	}
 //	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, 0);
+//	if(GPIO_Pin == GPIO_PIN_8 && (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_8) == 1)){
+//		danger = 1;
+//		while(1){
+//			HD44780_SetCursor(0,0);
+//		    HD44780_PrintStr("Negligible");
+//		}
+//	}
 	if(GPIO_Pin == GPIO_PIN_1 && (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1) == 1)){
 		done = 0;
-
 	}
+	if(GPIO_Pin == GPIO_PIN_0 && (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == 1)){
+		save = 1;
+	}
+	if(GPIO_Pin == GPIO_PIN_2 && (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_2) == 1)){
+		currState =!currState;
+		if (currState){
+			settings();
+		}else{
+			defaultDisplay();
+		}
+	}
+	if(GPIO_Pin == GPIO_PIN_10 && (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_10) == 1)){
+		if (currState){
+			menu += 1;
+			settings();
+		}
+	}
+	if(GPIO_Pin == GPIO_PIN_11 && (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_11) == 1)){
+		if (currState){
+			menu -= 1;
+			settings();
+		}
+	}
+	if(GPIO_Pin == GPIO_PIN_13 && (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_13) == 1)){
+			if (currState){
+				executeAction();
+			}
+		}
+
 
 		//	   HD44780_SetCursor(0,0);
 		//	   HD44780_PrintStr("Processing...");

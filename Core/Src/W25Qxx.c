@@ -21,12 +21,12 @@ void W25Q_Delay(uint32_t time)
 
 void csLOW (void)
 {
-	HAL_GPIO_WritePin (GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin (GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
 }
 
 void csHIGH (void)
 {
-	HAL_GPIO_WritePin (GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
+	HAL_GPIO_WritePin (GPIOB, GPIO_PIN_12, GPIO_PIN_SET);
 }
 
 void SPI_Write (uint8_t *data, uint8_t len)
